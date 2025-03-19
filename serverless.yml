@@ -1,0 +1,125 @@
+service: samsung-scoreboard-api
+
+frameworkVersion: "3"
+
+provider:
+  name: aws
+  runtime: python3.9
+  websocketsApiName: samsung-scoreboard
+  websocketsApiRouteSelectionExpression: $request.body.action
+  # logs:
+  #   websocket: true
+  environment:
+    CLIENT_TABLE: ${self:service}-client-${opt:stage, self:provider.stage}
+    SCORE_TABLE: ${self:service}-score-${opt:stage, self:provider.stage}
+    RANK_TABLE: ${self:service}-rank-${opt:stage, self:provider.stage}
+    RANK_INDEX: ${self:service}-rank-index-${opt:stage, self:provider.stage}
+    WEBSOCKET_API: !Sub https://${WebsocketsApi}.execute-api.${opt:region}.amazonaws.com/${opt:stage}/
+  apiGateway:
+    apiKeys:
+      - samsung-scoreboard-api-key
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:Query
+            - dynamodb:Scan
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+          Resource:
+            - "arn:aws:dynamodb:${aws:region}:*:table/${self:provider.environment.CLIENT_TABLE}"
+            - "arn:aws:dynamodb:${aws:region}:*:table/${self:provider.environment.SCORE_TABLE}"
+            - "arn:aws:dynamodb:${aws:region}:*:table/${self:provider.environment.RANK_TABLE}"
+        - Effect: Allow
+          Action:
+            - execute-api:ManageConnections
+          Resource:
+            - !Sub arn:aws:execute-api:${opt:region}:${AWS::AccountId}:${WebsocketsApi}/${opt:stage}/*
+
+functions:
+  connection:
+    handler: functions/connection.handler
+    events:
+      - websocket:
+          route: $connect
+      - websocket:
+          route: $disconnect
+
+  update:
+    handler: functions/update.handler
+    events:
+      - websocket:
+          route: update
+
+  sendRecord:
+    handler: functions/sendRecord.handler
+    events:
+      - websocket:
+          route: ready
+
+  ping:
+    handler: functions/ping.handler
+    events:
+      - websocket:
+          route: ping
+
+resources:
+  Resources:
+    ClientTable:
+      Type: "AWS::DynamoDB::Table"
+      DeletionPolicy: Retain
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+        TableName: ${self:provider.environment.CLIENT_TABLE}
+
+    ScoreTable:
+      Type: "AWS::DynamoDB::Table"
+      DeletionPolicy: Retain
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: mobile
+            AttributeType: S
+          - AttributeName: submitTime
+            AttributeType: S
+        KeySchema:
+          - AttributeName: mobile
+            KeyType: HASH
+          - AttributeName: submitTime
+            KeyType: RANGE
+        BillingMode: PAY_PER_REQUEST
+        TableName: ${self:provider.environment.SCORE_TABLE}
+
+    RankTable:
+      Type: "AWS::DynamoDB::Table"
+      DeletionPolicy: Retain
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: mobile
+            AttributeType: S
+          - AttributeName: time
+            AttributeType: N
+          - AttributeName: prefix
+            AttributeType: S
+        KeySchema:
+          - AttributeName: mobile
+            KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: ${self:provider.environment.RANK_INDEX}
+            KeySchema:
+              - AttributeName: prefix
+                KeyType: HASH
+              - AttributeName: time
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+        BillingMode: PAY_PER_REQUEST
+        TableName: ${self:provider.environment.RANK_TABLE}

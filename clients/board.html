@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <meta http-equiv="X-UA-Compatible" content="ie=edge"/>
+    <title>Samsung Scoreboard Client</title>
+    <style>
+      .timestamp {
+        color: grey;
+        font-weight: light;
+      }
+      .error {
+        color: red;
+        font-weight: bold;
+      }
+      .success {
+        color: green;
+      }
+      #messages {
+        max-width: 100%;
+        overflow: scroll;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Samsung Scoreboard Client</h1>
+    <button id="connect" onclick="connect()">Connect</button>
+    <button id="disconnect" onclick="disconnect()" disabled>Disconnect</button>
+    <table>
+      <thead>
+        <tr>
+          <td>RANK</td>
+          <td>NAME</td>
+          <td>TIME</td>
+        </tr>
+      </thead>
+      <tbody id="records">
+      </tbody>
+    </table>
+    <pre id="messages"></pre>
+    <script>
+      let records = [], socket, pingInterval;
+      const recordsCtn = document.querySelector('#records');
+      const messagesCtn = document.querySelector('#messages');
+      const connectBtn = document.querySelector('#connect');
+      const disconnectBtn = document.querySelector('#disconnect');
+      function connect() {
+        connectBtn.disabled = true;
+        socket = new WebSocket('wss://x9bd2vbrrc.execute-api.ap-southeast-2.amazonaws.com/staging?role=board');
+        socket.addEventListener('open', (event) => {
+          console.log(event);
+          displayMessage('connection', 'connection opened');
+          disconnectBtn.disabled = false;
+          socket.send(JSON.stringify({ action: 'ready' }));
+          pingInterval = setInterval(ping, 30000);
+        });
+        socket.addEventListener('error', (event) => {
+          console.log(event);
+          displayMessage('error', 'an error occured');
+        });
+        socket.addEventListener('close', (event) => {
+          console.log(event);
+          displayMessage('connection', `connection closed (${event.code}${event.reason})`);
+          clearInterval(pingInterval);
+          connectBtn.disabled = false;
+          disconnectBtn.disabled = true;
+        });
+        socket.addEventListener('message', (event) => {
+          console.log(event);
+          try {
+            const { type, body } = JSON.parse(event.data);
+            switch(type) {
+              case 'init':
+                onInit(body);
+                break;
+              case 'update':
+                onUpdate(body);
+                break;
+              default:
+                displayMessage('error', `unknown event type - ${type}`);
+                break;
+            }
+          } catch {
+            displayMessage('error', `unknown data - ${event.data.toString()}`);
+          }
+        });
+      }
+      function disconnect() {
+        disconnectBtn.disabled = true;
+        socket.close();
+        connectBtn.disabled = false;
+      }
+      function ping() {
+        socket.send(JSON.stringify({ action: 'ping' }));
+        displayMessage('connection', 'sent a ping to keep connected');
+      }
+      function onInit(_records) {
+        records = _records;
+        // retain the order given by the API
+        displayMessage('success', `recieved ${_records.length} initial records`);
+        showRecords();
+      }
+      function onUpdate(_record) {
+        // check if the updated record was in the list
+        const index = records.findIndex((record) => record.email == _record.email);
+        if (index === -1) {
+          displayMessage('success', `recieved a new record for ${_record.email}`);
+          records.push(_record);
+          records.sort((a, b) => a.time - b.time);
+          // the initial records may not have have been filled
+          if (records.length > 10) {
+            records.pop();
+          }
+        } else {
+          displayMessage('success', `recieved a new record from ${_record.email}`);
+          records[index].time = _record.time;
+          // move to bottom in case the updated record has a lower score than before
+          // records.push(array.splice(index, 1)[0]);
+          records.sort((a, b) => a.time - b.time);
+        }
+        showRecords();
+      }
+      function showRecords() {
+        recordsCtn.innerHTML = '';
+        records.forEach((record, index) => {
+          const row = document.createElement('tr');
+          row.id = `record${index}`;
+          const rankTd = document.createElement('td');
+          rankTd.innerHTML = index + 1;
+          row.appendChild(rankTd);
+          const nameTd = document.createElement('td');
+          nameTd.innerHTML = record.name;
+          row.appendChild(nameTd);
+          const timeTd = document.createElement('td');
+          let time = record.time;
+          const milliseconds = time % 1000;
+          time = (time - milliseconds) / 1000;
+          const seconds = time % 60;
+          const minutes = (time - seconds) / 60;
+          timeTd.innerHTML = `${('0' + minutes).slice(-2)}:${('0' + seconds).slice(-2)}.${('00' + milliseconds).slice(-3)}`;
+          row.appendChild(timeTd);
+          recordsCtn.appendChild(row);
+        });
+      }
+      function displayMessage(type, message) {
+        const timestamp = new Date().toISOString();
+        messagesCtn.innerHTML += `<span class="timestamp">${timestamp}</span> `;
+        messagesCtn.innerHTML += `<span class="${type}">[${type}] ${message}</span><br>`;
+      }
+    </script>
+  </body>
+</html>

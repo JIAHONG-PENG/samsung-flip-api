@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <meta http-equiv="X-UA-Compatible" content="ie=edge"/>
+    <title>Samsung Submitter Client</title>
+    <!-- need a better name than submitter -->
+    <style>
+      .timestamp {
+        color: grey;
+        font-weight: light;
+      }
+      .error {
+        color: red;
+        font-weight: bold;
+      }
+      .success {
+        color: green;
+      }
+      #messages {
+        max-width: 100%;
+        overflow: scroll;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Samsung Submitter Client</h1>
+    <button id="connect">Connect</button>
+    <button id="disconnect" disabled>Disconnect</button>
+    <form id="record">
+      <label for="name">Name:</label>
+      <input id="name" name="name" type="text" placeholder="John Smith" data-default="" required disabled/>
+      <label for="minutes">Time:</label>
+      <input id="minutes" name="minutes" type="number" min="0" max="60" value="00" data-default="00" required disabled/>:<input id="seconds" name="seconds" type="number" min="0" max="59" value="00" data-default="00" required disabled/>.<input id="milliseconds" name="milliseconds" type="number" min="0" max="999" value="000" data-default="000" required disabled/>
+      <label for="email">Email:</label>
+      <input id="email" name="email" type="email" placeholder="inbox@email.com" data-default="" required disabled/>
+      <input type="submit" value="Submit" disabled/>
+    </form>
+    <pre id="messages"></pre>
+    <script>
+      let socket, pingInterval;
+      const messagesCtn = document.querySelector('#messages');
+      const connectBtn = document.querySelector('#connect');
+      connectBtn.addEventListener('click', connect);
+      const disconnectBtn = document.querySelector('#disconnect');
+      disconnectBtn.addEventListener('click', disconnect);
+      const recordFrm = document.querySelector('#record');
+      recordFrm.addEventListener('submit', submit);
+      function connect() {
+        connectBtn.disabled = true;
+        socket = new WebSocket('wss://x9bd2vbrrc.execute-api.ap-southeast-2.amazonaws.com/staging?role=submitter');
+        socket.addEventListener('open', (event) => {
+          console.log(event);
+          displayMessage('connection', 'connection opened');
+          disconnectBtn.disabled = false;
+          recordFrm.querySelectorAll('input').forEach(input => input.disabled = false);
+          pingInterval = setInterval(ping, 30000);
+        });
+        socket.addEventListener('error', (event) => {
+          console.log(event);
+          displayMessage('error', 'an error occured');
+        });
+        socket.addEventListener('close', (event) => {
+          console.log(event);
+          displayMessage('connection', `connection closed (${event.code}${event.reason})`);
+          clearInterval(pingInterval);
+          connectBtn.disabled = false;
+          disconnectBtn.disabled = true;
+          recordFrm.querySelectorAll('input').forEach(input => input.disabled = true);
+        });
+        // no messages are expecteed
+        // socket.addEventListener('message', (event) => {
+        //   console.log(event);
+        // });
+      }
+      function disconnect() {
+        disconnectBtn.disabled = true;
+        socket.close();
+        connectBtn.disabled = false;
+      }
+      function ping() {
+        socket.send(JSON.stringify({ action: 'ping' }));
+        displayMessage('connection', 'sent a ping to keep connected');
+      }
+      function submit(event) {
+        event.preventDefault();
+        const formData = Object.fromEntries(new FormData(event.target).entries());
+        recordFrm.querySelectorAll("input:not([type='submit'])").forEach(input => input.value = input.dataset.default);
+        formData.time = parseInt(formData.minutes) * 60000 + parseInt(formData.seconds) * 1000 + parseInt(formData.milliseconds);
+        console.log(formData);
+        socket.send(JSON.stringify({
+          action: 'update',
+          body: formData,
+        }));
+        displayMessage('success', `sent new record (${JSON.stringify(formData)})`);
+      }
+      function displayMessage(type, message) {
+        const timestamp = new Date().toISOString();
+        messagesCtn.innerHTML += `<span class="timestamp">${timestamp}</span> `;
+        messagesCtn.innerHTML += `<span class="${type}">[${type}] ${message}</span><br>`;
+      }
+    </script>
+  </body>
+</html>
